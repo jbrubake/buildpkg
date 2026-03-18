@@ -1,0 +1,243 @@
+#!/bin/sh
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program. If not, see <http://www.gnu.org/licenses/>.
+#
+# Copyright 2026 Jeremy Brubaker <jbru362@gmail.com>
+#
+# abstract: Simplify building RPMs from specfiles
+#
+# Defaults {{{1
+#
+MOCK_GROUP=mock
+MOCK_CONFIG=
+PKG_DIR=.
+RPM_ROOT=${XDG_STATE_HOME:-"$HOME/.local/state"}/rpms
+CHECK='--without check'
+
+# Documentation {{{1
+#
+VERSION=1.0
+print_version() { # {{{2
+    cat <<END
+$(basename "$0") $VERSION
+Copyright (C) 2026 Orion Arts
+License GPLv3+: GNU GPL version 3 or later <https://gnu.org/licenses/gpl.html>.
+This is free software: you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.
+
+Written by Jeremy Brubaker.
+END
+} >&2
+
+print_help() { # {{{2
+    cat <<END
+Usage: $(basename "$0") [OPTION] PACKAGE...
+
+Build multiple PACKAGES by loading \$(pwd)/PACKAGE/PACKAGE.spec
+
+  -d, --pkg-dir [PATH]  search for PACKAGE in PATH (Default: $PKG_DIR)
+  -r, --root [PATH]     use PATH as the root for saving tarballs, SRPMs and RPMs
+                          (Default: $RPM_ROOT)
+  -c, --config [CONFIG] use CONFIG as the mock(1) chroot
+                          (Default: system default)
+  --check               run tests
+  --no-check            do not run tests (This is the default but only works if
+                          the SPECFILE guards '%check' with '%if %{with check}'
+
+  -h, --help            display this help and exit
+  -V, --version         output version information and exit
+END
+} >&2
+
+# Process options {{{1
+#
+# Based on Adam Katz's original at
+# https://gist.github.com/adamhotep/895cebf290e95e613c006afbffef09d7
+#
+# a refinement of https://stackoverflow.com/a/5255468/519360 see also [his]
+# non-translating version at https://stackoverflow.com/a/28466267/519360
+#
+print_noarg()   { printf '%s requires an argument\n' "$1"; } >&2
+print_invalid() { printf 'Invalid option: %s\n' "$1"; } >&2
+
+# Preprocess long options {{{2
+#
+reset=true stopped= grab=
+for opt in "$@"; do
+    # {{{
+    # reset the "$@" array so we can rebuild it
+    if [ -n "$reset" ]; then
+        set --
+        unset reset
+    fi
+
+    # Split --option=arg
+    case $opt in
+        --?*=*)  optarg=${opt#*=} opt=${opt%%=*} ;;
+        *)       unset optarg ;;
+    esac
+
+    # If $grab is set then we have an option waiting for an argument
+    if [ -n "$grab" ]; then
+        optarg=$opt # $opt holds the needed argument
+        opt=$grab   # recheck the previous option
+        unset grab  # unset the flag
+    fi
+
+    case $stopped$opt in
+        --)                stopped=true; set -- "$@" -- ;;
+        # }}}
+        # Long options
+        #
+        --pkg-dir) set -- "$@" -d ${optarg+"$optarg"} ;;
+        --root)    set -- "$@" -r ${optarg+"$optarg"} ;;
+        --config)  set -- "$@" -c ${optarg+"$optarg"} ;;
+        --check)   CHECK='--with check' ;;
+        --no-check) CHECK='--without check' ;;
+        --help)    set -- "$@" -h ;;
+        --version) set -- "$@" -V ;;
+        # {{{
+
+        --*)       print_invalid "$opt"; print_help; exit 1 ;;
+        *)         set -- "$@" "$opt" ;;
+    esac
+done
+# }}}
+# Process short options {{{2
+#
+while getopts ":d:r:c:hV" opt; do
+    case $opt in
+        d)  PKG_DIR=$OPTARG ;;
+        r)  RPM_ROOT=$OPTARG ;;
+        c)  MOCK_CONFIG=$OPTARG ;;
+
+        h)  print_help; exit ;;
+        V)  print_version; exit ;;
+
+        \?) print_invalid "-$OPTARG"; print_help; exit 1 ;;
+        :)  case $OPTARG in
+                d) opt='-d, --pkg-dir' ;;
+                r) opt='-r, --root' ;;
+                c) opt='-c, --config' ;;
+            esac
+            print_noarg "$opt"; print_help; exit 1 ;;
+    esac
+done
+shift $((OPTIND-1))
+OPTIND=1
+
+# Main {{{1
+#
+die() {
+    printf '%s\n' "$1" >&2
+    exit 1
+}
+
+[ -d "$RPM_ROOT" -a -w "$RPM_ROOT" ] ||
+    die '$RPM_ROOT is not a writable directory!'
+
+groups | grep -q "$MOCK_GROUP" ||
+    die "You are not a member of the $MOCK_GROUP group!"
+
+trap '
+    trap - INT
+    kill -s INT "$$"
+' INT
+
+trap 'rm -rf $WORKDIR' EXIT
+WORKDIR=$(mktemp -d --tmpdir buildpkg.XXXXXX)
+
+MOCK_CONFIG=${MOCK_CONFIG:+--root "$MOCK_CONFIG"}
+MOCK_ROOT=$(mock $MOCK_CONFIG --print-root-path)
+ARCH=$(uname -m)
+
+# Load custom macros
+MACROS=$(find \
+    /usr/share/buildpkg/macros.d \
+    /usr/local/share/buildpkg/macros.d \
+    "${XDG_DATA_HOME:-"$HOME/.local/share"}/buildpkg/macros.d" \
+    -type f -printf ':%p' 2>/dev/null)
+
+if [ -n "$MACROS" ]; then
+    rpmbuild_macros=$(printf '%s' "$MACROS" | sed 's/:/ --load=/g')
+    mock_macros=$(printf '%s' "$MACROS" | sed 's/:/ --macro-file=/g')
+fi
+
+# This is a subshell so die() just exits the function, allowing
+# additional packages to continue being built
+build_rpm() (
+    name=$1
+    workdir=$WORKDIR/$name
+    mkdir -p "$workdir"
+    clog=$workdir/changelog
+
+    cp -ar "$PKG_DIR/$name"/{*,.*} "$workdir"
+    specfile=$workdir/$name.spec
+
+    # TODO: Check if this failed somehow because spectool never "fails"
+    # Download any missing sources and copy all remote sources to $workdir
+    spectool --get-files --directory "$RPM_ROOT/SOURCES" "$specfile"
+    for f in $(spectool --get-files --dry-run "$specfile" | cut -d: -f3); do
+        cp -a "$RPM_ROOT/SOURCES/$(basename "$f")" "$workdir"
+    done
+
+    # Handle rpmautospec stuff
+    # TODO: Get rpmautospec to do this automatically
+    if grep -qE '%autorelease|%autochangelog' "$specfile"; then
+        rel=$(rpmautospec calculate-release "$specfile" | cut -d: -f2)
+        rpmautospec generate-changelog "$specfile" > "$clog"
+
+        if sed "
+            s/%autorelease/$rel/
+            /%autochangelog/r $clog
+            /%autochangelog/d
+            " "$specfile" > "$specfile.srpm"
+        then
+            mv "$specfile.srpm" "$specfile"
+        else
+            die 'Could not handle %autorelease and %autochangelog!'
+        fi
+    fi
+
+    # Build the SRPM, get its path and then output the rpmbuild output
+    out=$(rpmbuild --define "_topdir $RPM_ROOT" --define "_sourcedir $workdir" $rpmbuild_macros -bs "$specfile")
+    [ $? -eq 0 ] || die 'Could not build SRPM'
+    srpm=$(printf '%s' "$out" | sed -n '/^Wrote:/s/Wrote:[[:space:]]*//p')
+    printf '%s\n' "$out"
+
+    # Build the RPM
+    mock $mock_macros --enable-network --rebuild $MOCK_CONFIG $CHECK "$srpm" ||
+        die 'Could not build RPMs'
+
+    printf 'Copying RPMs from %s to %s\n' "$MOCK_ROOT../result" "$RPM_ROOT/RPMS"
+    find "$MOCK_ROOT"/../result -name "*$ARCH.rpm" -exec cp '{}' "$RPM_ROOT/RPMS/$ARCH" \;
+    find "$MOCK_ROOT"/../result -name "*noarch.rpm" -exec cp '{}' "$RPM_ROOT/RPMS/noarch" \;
+)
+
+mkdir -p "$RPM_ROOT"/{BUILD,RPMS/{noarch,"$ARCH"},SOURCES,SRPMS}
+
+unset failed
+for pkg in "$@"; do
+    printf '====================\n'
+    printf 'Building %s...\n' "$pkg"
+    printf '====================\n'
+    if ! build_rpm "$pkg"; then
+        printf 'Failed to build RPMs for %s!\n' "$pkg"
+        failed="$failed\n - $pkg"
+    fi
+    echo
+done
+
+[ -n "$failed" ] && printf "Failed to build RPMs for: $failed\n"
+
