@@ -54,7 +54,8 @@ Build multiple PACKAGES by loading \$(pwd)/PACKAGE/PACKAGE.spec
   --check               run tests
   --no-check            do not run tests (This is the default but only works if
                           the SPECFILE guards '%check' with '%if %{with check}'
-
+  --with=OPTION         build RPM with OPTION 
+  --without=OPTION      build RPM without OPTION
   -h, --help            display this help and exit
   -V, --version         output version information and exit
 END
@@ -74,6 +75,7 @@ print_invalid() { printf 'Invalid option: %s\n' "$1"; } >&2
 # Preprocess long options {{{2
 #
 reset=true stopped= grab=
+with=
 for opt in "$@"; do
     # {{{
     # reset the "$@" array so we can rebuild it
@@ -107,6 +109,20 @@ for opt in "$@"; do
         --no-check) CHECK='--without=check' ;;
         --help)     set -- "$@" -h ;;
         --version)  set -- "$@" -V ;;
+        --with|--without)
+            # $optarg is normally only set if we passed --opt=arg. If we passed
+            # '--opt arg' without the '=' we need to grab the next value of $opt
+            # as our argument
+            #
+            # $optarg is set so we can process the option
+            if [ -n "$optarg" ]; then
+                with="$with $opt=$optarg"
+            # $optarg is not set so we set a flag to the name of this option so
+            # the next time through the loop we can match this block again
+            else
+                grab=$opt
+            fi
+            ;;
         # {{{
 
         --*)       print_invalid "$opt"; print_help; exit 1 ;;
@@ -220,7 +236,7 @@ build_rpm() (
     printf '%s\n' "$out"
 
     # Build the RPM
-    mock $mock_macros --enable-network --rebuild $MOCK_CONFIG $CHECK "$srpm" ||
+    mock $mock_macros --enable-network --rebuild $with $MOCK_CONFIG $CHECK "$srpm" ||
         die 'Could not build RPMs'
 
     printf 'Copying RPMs from %s to %s\n' "$MOCK_ROOT../result" "$RPM_ROOT/RPMS"
