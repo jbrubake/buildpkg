@@ -145,6 +145,8 @@ die() {
     exit 1
 }
 
+[ $# -eq 0 ] && die 'Build what?'
+
 [ -d "$RPM_ROOT" -a -w "$RPM_ROOT" ] ||
     die '$RPM_ROOT is not a writable directory!'
 
