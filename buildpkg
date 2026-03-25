@@ -23,7 +23,7 @@ MOCK_GROUP=mock
 MOCK_CONFIG=
 PKG_DIR=.
 RPM_ROOT=${XDG_STATE_HOME:-"$HOME/.local/state"}/rpms
-CHECK='--without check'
+CHECK='--without=check'
 
 # Documentation {{{1
 #
@@ -100,19 +100,20 @@ for opt in "$@"; do
         # }}}
         # Long options
         #
-        --pkg-dir) set -- "$@" -d ${optarg+"$optarg"} ;;
-        --root)    set -- "$@" -r ${optarg+"$optarg"} ;;
-        --config)  set -- "$@" -c ${optarg+"$optarg"} ;;
-        --check)   CHECK='--with check' ;;
-        --no-check) CHECK='--without check' ;;
-        --help)    set -- "$@" -h ;;
-        --version) set -- "$@" -V ;;
+        --pkg-dir)  set -- "$@" -d ${optarg+"$optarg"} ;;
+        --root)     set -- "$@" -r ${optarg+"$optarg"} ;;
+        --config)   set -- "$@" -c ${optarg+"$optarg"} ;;
+        --check)    CHECK='--with=check' ;;
+        --no-check) CHECK='--without=check' ;;
+        --help)     set -- "$@" -h ;;
+        --version)  set -- "$@" -V ;;
         # {{{
 
         --*)       print_invalid "$opt"; print_help; exit 1 ;;
         *)         set -- "$@" "$opt" ;;
     esac
 done
+
 # }}}
 # Process short options {{{2
 #
