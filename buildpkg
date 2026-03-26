@@ -204,7 +204,6 @@ build_rpm() (
     cp -ar "$PKG_DIR/$name"/{*,.*} "$workdir"
     specfile=$workdir/$name.spec
 
-    # TODO: Check if this failed somehow because spectool never "fails"
     # Download any missing sources and copy all remote sources to $workdir
     spectool --get-files --directory "$RPM_ROOT/SOURCES" "$specfile"
     for f in $(spectool --get-files --dry-run "$specfile" | cut -d: -f3); do
