@@ -211,6 +211,12 @@ build_rpm() (
         cp -a "$RPM_ROOT/SOURCES/$(basename "$f")" "$workdir"
     done
 
+    # If there is a file with sha512 sums, check that sources were downloaded
+    if [ -r "$workdir/sources" ]; then
+        (cd "$workdir" && sha512sum --status --check sources) ||
+            die 'Error downloading sources!'
+    fi
+
     # Handle rpmautospec stuff
     # TODO: Get rpmautospec to do this automatically
     if grep -qE '%autorelease|%autochangelog' "$specfile"; then
