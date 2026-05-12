@@ -197,6 +197,8 @@ fi
 # additional packages to continue being built
 build_rpm() (
     name=$1
+    [ -d "$name" ] || die "No package directory: $name"
+
     workdir=$WORKDIR/$name
     mkdir -p "$workdir"
     clog=$workdir/changelog
