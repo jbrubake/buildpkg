@@ -235,7 +235,6 @@ build_rpm() (
             die 'Could not handle %autorelease and %autochangelog!'
         fi
     fi
-
     # Build the SRPM, get its path and then output the rpmbuild output
     out=$(rpmbuild --define "_topdir $RPM_ROOT" --define "_sourcedir $workdir" $rpmbuild_macros -bs "$specfile")
     [ $? -eq 0 ] || die 'Could not build SRPM'
