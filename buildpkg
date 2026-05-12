@@ -196,7 +196,7 @@ fi
 # This is a subshell so die() just exits the function, allowing
 # additional packages to continue being built
 build_rpm() (
-    name=$1
+    name=${1%%/}
     [ -d "$name" ] || die "No package directory: $name"
 
     workdir=$WORKDIR/$name
